@@ -34,7 +34,7 @@ $19 one-time → Unlimited students
 [Buy on Gumroad](https://gumroad.com/l/gradebook-pdf-pro)
 
 ## GitHub
-Coming soon: https://github.com/clawd-ai/gradebook-pdf-generator
+https://github.com/harryherzberg/gradebook-pdf-generator
 
 ## License
 MIT for personal use. Commercial: Pro license required.
