@@ -1,0 +1,212 @@
+&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+    &lt;meta charset=&quot;UTF-8&quot;&gt;
+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;&gt;
+    &lt;title&gt;Gradebook PDF Generator&lt;/title&gt;
+    &lt;script src=&quot;https://cdn.skypack.dev/papaparse@0.4&quot;&gt;&lt;/script&gt;
+    &lt;script src=&quot;https://cdn.skypack.dev/pdf-lib@^1.17.1&quot;&gt;&lt;/script&gt;
+    &lt;script src=&quot;https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js&quot;&gt;&lt;/script&gt;
+    &lt;style&gt;
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #upload { margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #proNag { background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; margin: 20px 0; border-radius: 5px; text-align: center; }
+        .pass { color: green; font-weight: bold; }
+        .fail { color: red; font-weight: bold; }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;h1&gt;Gradebook PDF Generator&lt;/h1&gt;
+    &lt;div id=&quot;upload&quot;&gt;
+        &lt;input type=&quot;file&quot; id=&quot;csvFile&quot; accept=&quot;.csv&quot;&gt;
+        &lt;button onclick=&quot;parseCSV()&quot;&gt;Parse CSV&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;div id=&quot;students&quot;&gt;&lt;/div&gt;
+    &lt;div id=&quot;proNag&quot; style=&quot;display:none;&quot;&gt;
+        &lt;h3&gt;🚀 Go Pro for Unlimited Students!&lt;/h3&gt;
+        &lt;p&gt;Free trial limited to 5 students. Unlock unlimited with Pro for just $19.&lt;/p&gt;
+        &lt;a href=&quot;https://gumroad.com/l/gradebook-pdf-pro&quot; target=&quot;_blank&quot; style=&quot;background:#ff69b4; color:white; padding:15px 30px; text-decoration:none; border-radius:5px; font-weight:bold;&quot;&gt;Buy Pro $19&lt;/a&gt;
+    &lt;/div&gt;
+    &lt;button id=&quot;genAll&quot; onclick=&quot;generateAll()&quot;&gt;📦 Download All PDFs (ZIP)&lt;/button&gt;
+
+    &lt;script&gt;
+        let students = [];
+
+        async function parseCSV() {
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+            if (!file) return alert('Please select a CSV file.');
+
+            const results = await new Promise((resolve) =&gt; {
+                Papa.parse(file, {
+                    header: false,
+                    skipEmptyLines: true,
+                    complete: resolve
+                });
+            });
+
+            let rows = results.data;
+            // Skip header if present (check if second column is 'name')
+            if (rows.length &gt; 0 &amp;&amp; rows[0].length &gt; 1 &amp;&amp; rows[0][1] === 'name') {
+                rows = rows.slice(1);
+            }
+
+            students = rows
+                .filter(row =&gt; row.length &gt;= 2)
+                .map(row =&gt; {
+                    const id = row[0] || '';
+                    const name = row[1].trim();
+                    const subjects = [];
+                    const grades = [];
+                    for (let i = 2; i &lt; row.length; i += 2) {
+                        if (i + 1 &lt; row.length) {
+                            subjects.push(row[i].trim());
+                            const grade = parseFloat(row[i + 1]);
+                            grades.push(isNaN(grade) ? 0 : grade);
+                        }
+                    }
+                    const avg = grades.length ? grades.reduce((a, b) =&gt; a + b, 0) / grades.length : 0;
+                    const pass = avg &gt; 60 ? 'PASS' : 'FAIL';
+                    let comment;
+                    if (avg &gt; 90) comment = 'Excellent performance! Keep it up!';
+                    else if (avg &gt; 80) comment = 'Great job! Well done.';
+                    else if (avg &gt; 60) comment = 'Good effort. Room for improvement.';
+                    else comment = 'Needs significant improvement. Let\\'s work harder.';
+                    return { id, name, subjects, grades, avg, pass, comment };
+                })
+                .filter(s =&gt; s.name);
+
+            displayStudents();
+        }
+
+        function displayStudents() {
+            const container = document.getElementById('students');
+            if (students.length === 0) {
+                container.innerHTML = '&lt;p&gt;No students parsed.&lt;/p&gt;';
+                return;
+            }
+
+            let html = `&lt;h2&gt;Parsed ${students.length} Students&lt;/h2&gt;
+                &lt;table&gt;
+                    &lt;tr&gt;&lt;th&gt;Name&lt;/th&gt;&lt;th&gt;Subjects&lt;/th&gt;&lt;th&gt;Avg&lt;/th&gt;&lt;th&gt;Status&lt;/th&gt;&lt;th&gt;Action&lt;/th&gt;&lt;/tr&gt;`;
+            students.forEach((student, index) =&gt; {
+                html += `&lt;tr&gt;
+                    &lt;td&gt;${student.name}&lt;/td&gt;
+                    &lt;td&gt;${student.subjects.join(', ')}&lt;/td&gt;
+                    &lt;td&gt;${student.avg.toFixed(1)}%&lt;/td&gt;
+                    &lt;td class=&quot;${student.pass.toLowerCase()}&quot;&gt;${student.pass}&lt;/td&gt;
+                    &lt;td&gt;&lt;button onclick=&quot;downloadSingle(${index})&quot;&gt;PDF&lt;/button&gt;&lt;/td&gt;
+                &lt;/tr&gt;`;
+            });
+            html += '&lt;/table&gt;';
+
+            container.innerHTML = html;
+
+            const proNag = document.getElementById('proNag');
+            const genAllBtn = document.getElementById('genAll');
+            if (students.length &gt; 5) {
+                proNag.style.display = 'block';
+                genAllBtn.disabled = true;
+                genAllBtn.textContent = 'Pro Required (Unlimited)';
+            } else {
+                proNag.style.display = 'none';
+                genAllBtn.disabled = false;
+                genAllBtn.textContent = '📦 Download All PDFs (ZIP)';
+            }
+        }
+
+        async function createPDF(student) {
+            const { PDFDocument, StandardFonts, rgb } = PDFLib;
+            const pdfDoc = await PDFDocument.create();
+            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+            const page = pdfDoc.addPage([550, 800]);
+            let y = 750;
+
+            // Title
+            page.drawText('Report Card', { x: 50, y, size: 24, font: boldFont, color: rgb(0, 0.2, 0.6) });
+            y -= 40;
+
+            // Student info
+            page.drawText(`Student: ${student.name}`, { x: 50, y, size: 16, font: boldFont, color: rgb(0, 0, 0) });
+            y -= 25;
+            if (student.id) {
+                page.drawText(`ID: ${student.id}`, { x: 50, y, size: 12, font, color: rgb(0.5, 0.5, 0.5) });
+                y -= 20;
+            }
+
+            // Grades
+            y -= 10;
+            page.drawText('Grades:', { x: 50, y, size: 14, font: boldFont, color: rgb(0, 0, 0) });
+            y -= 25;
+            student.subjects.forEach((sub, idx) =&gt; {
+                const gradeStr = `${sub}: ${student.grades[idx]}%`;
+                page.drawText(gradeStr, { x: 60, y, size: 12, font, color: rgb(0, 0, 0), maxWidth: 440 });
+                y -= 22;
+                if (y &lt; 100) {
+                    page = pdfDoc.addPage([550, 800]);
+                    y = 750;
+                }
+            });
+
+            // Summary
+            y -= 10;
+            page.drawText('Summary:', { x: 50, y, size: 14, font: boldFont, color: rgb(0, 0, 0) });
+            y -= 25;
+            const avgColor = student.avg &gt; 60 ? rgb(0, 0.6, 0) : rgb(0.8, 0, 0);
+            page.drawText(`Average: ${student.avg.toFixed(1)}%`, { x: 60, y, size: 12, font: boldFont, color: avgColor });
+            y -= 22;
+            const statusColor = student.pass === 'PASS' ? rgb(0, 0.6, 0) : rgb(0.8, 0, 0);
+            page.drawText(student.pass, { x: 60, y, size: 16, font: boldFont, color: statusColor });
+
+            y -= 40;
+            page.drawText(`Teacher Comment: ${student.comment}`, { x: 50, y, size: 12, font, color: rgb(0, 0, 0), maxWidth: 450, lineHeight: 15 });
+
+            const pdfBytes = await pdfDoc.save();
+            return new Blob([pdfBytes], { type: 'application/pdf' });
+        }
+
+        async function downloadSingle(index) {
+            const student = students[index];
+            if (!student) return;
+            const pdfBlob = await createPDF(student);
+            const url = URL.createObjectURL(pdfBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${student.id || student.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function generateAll() {
+            if (students.length === 0) return alert('No students to generate.');
+            if (students.length &gt; 5) return alert('Upgrade to Pro for more than 5 students.');
+
+            const zip = new JSZip();
+            for (let student of students) {
+                const pdfBlob = await createPDF(student);
+                const filename = `${student.id || student.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                zip.file(filename, pdfBlob);
+            }
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(zipBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'report_cards.zip';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
